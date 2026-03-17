@@ -1,10 +1,12 @@
 ﻿import 'dart:io';
 import 'dart:ui';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'models/shift.dart';
 import 'models/salary_record.dart';
 import 'database/database_helper.dart';
@@ -15,8 +17,12 @@ import 'screens/welcome_onboarding_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() {
+  if (kIsWeb) {
+    databaseFactory = databaseFactoryFfiWeb;
+  }
+
   // Initialize FFI for Windows/Linux/MacOS
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
@@ -60,8 +66,22 @@ class _AppLaunchGateState extends State<AppLaunchGate> {
   }
 
   Future<void> _loadLaunchState() async {
-    final onboardingSeen = await _dbHelper.getSettingValue('onboardingSeen');
-    final savedNickname = await _dbHelper.getSettingValue('nickname');
+    String? onboardingSeen;
+    String? savedNickname;
+
+    try {
+      onboardingSeen = await _dbHelper
+          .getSettingValue('onboardingSeen')
+          .timeout(const Duration(seconds: 4));
+      savedNickname = await _dbHelper
+          .getSettingValue('nickname')
+          .timeout(const Duration(seconds: 4));
+    } catch (_) {
+      // Fall back to onboarding instead of keeping the splash forever.
+      onboardingSeen = null;
+      savedNickname = null;
+    }
+
     final normalizedNickname = (savedNickname ?? '').trim();
 
     if (!mounted) return;
@@ -74,8 +94,16 @@ class _AppLaunchGateState extends State<AppLaunchGate> {
 
   Future<void> _completeOnboarding(String? nickname) async {
     final trimmedNickname = (nickname ?? '').trim();
-    await _dbHelper.setSettingValue('onboardingSeen', '1');
-    await _dbHelper.setSettingValue('nickname', trimmedNickname);
+    try {
+      await _dbHelper
+          .setSettingValue('onboardingSeen', '1')
+          .timeout(const Duration(seconds: 4));
+      await _dbHelper
+          .setSettingValue('nickname', trimmedNickname)
+          .timeout(const Duration(seconds: 4));
+    } catch (_) {
+      // Allow app entry even if persistence fails on this device/browser.
+    }
 
     if (!mounted) return;
     setState(() {
